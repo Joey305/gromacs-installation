@@ -1,756 +1,580 @@
 # 🧬 GROMACS Installation
 
 <p align="center">
-  <strong>Reproducible GROMACS 2026.3 installation for Conda, Linux/WSL2, and NVIDIA GPU acceleration</strong>
+  <strong>System-Wide GROMACS 2026.3 Installation for Linux / WSL2 with NVIDIA CUDA GPU Acceleration</strong>
 </p>
 
 <p align="center">
-  <em>One environment. One installer. A working <code>gmx</code> command.</em>
+  <em>One system installation. Every Conda environment. One <code>gmx</code> command.</em>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/GROMACS-2026.3-blue?style=for-the-badge" alt="GROMACS 2026.3">
-  <img src="https://img.shields.io/badge/NVIDIA-CUDA%20Auto--Detect-76B900?style=for-the-badge&logo=nvidia" alt="NVIDIA CUDA">
-  <img src="https://img.shields.io/badge/Linux%20%2F%20WSL2-Supported-orange?style=for-the-badge&logo=linux" alt="Linux and WSL2">
-  <img src="https://img.shields.io/badge/Conda-Environment--Local-44A833?style=for-the-badge&logo=anaconda" alt="Conda">
+  <img src="https://img.shields.io/badge/Install-System--Wide-success?style=for-the-badge&logo=linux" alt="System-wide">
+  <img src="https://img.shields.io/badge/NVIDIA-CUDA%20GPU-76B900?style=for-the-badge&logo=nvidia" alt="NVIDIA CUDA GPU">
+  <img src="https://img.shields.io/badge/Linux%20%2F%20WSL2-Supported-orange?style=for-the-badge&logo=ubuntu" alt="Linux / WSL2">
 </p>
 
 ---
 
 ## 🚀 Overview
 
-This repository provides a **copy-and-paste installation workflow for GROMACS 2026.3**.
+This repository provides a reproducible installer for **GROMACS 2026.3** that installs GROMACS at the **system level**, not inside Conda.
 
-The installer is designed for molecular-dynamics workflows such as **PyMACS**:
+It is designed for molecular-dynamics workflows such as:
 
-> https://github.com/schurerlab/Pymacs
+**PyMACS — A Python-Based Automation Suite for GROMACS Molecular Dynamics Setup, Simulation, Analysis, and Figurebook Generation**
 
-The goal is to avoid the common situation where a Python/MDAnalysis Conda environment is active but:
+https://github.com/schurerlab/Pymacs
+
+The goal is simple:
 
 ```text
-gmx: command not found
+base          ─┐
+mdanalysis     ├──> /usr/local/bin/gmx
+cgenff         │
+other Conda env├──> same GROMACS installation
+no Conda       ┘
 ```
 
-The installer builds GROMACS from the official source release and installs it **directly inside the active Conda environment**.
-
-That means:
-
-- no system-wide GROMACS installation is required
-- no `sudo make install` is required
-- `gmx` is associated with the Conda environment
-- different Conda environments can carry different GROMACS installations
-- the environment remains straightforward to reproduce
-- PyMACS can use the standard `gmx` executable
-- an NVIDIA GPU is used when CUDA is available
+After installation, `gmx` is available independently of which Conda environment is active.
 
 ---
 
 ## ⚡ Super Quick Start
 
-Activate the Conda environment that should own GROMACS.
-
-For PyMACS this is commonly:
+Clone the repository:
 
 ```bash
-conda activate mdanalysis
+git clone https://github.com/Joey305/gromacs-installation.git
+cd gromacs-installation
 ```
 
-Confirm that you are **not** in `base`:
+Run:
 
 ```bash
-echo "$CONDA_DEFAULT_ENV"
+chmod +x install_gromacs.sh
+./install_gromacs.sh
 ```
 
-Then copy and paste the complete installer below.
+You may run the installer while `base`, `mdanalysis`, `cgenff`, another Conda environment, or no Conda environment is active.
 
-> **Important:** this installer intentionally refuses to install into Conda `base`.
+**The active Conda environment does not own the installation.**
 
-```bash
-#!/usr/bin/env bash
-set -Eeuo pipefail
+The installer requires `sudo` because GROMACS is installed under `/usr/local`.
 
-# ============================================================
-# GROMACS 2026.3 — Reproducible Conda + NVIDIA CUDA Installer
-# Linux / WSL2, x86_64
-#
-# Installs GROMACS directly into the ACTIVE Conda environment.
-# If an NVIDIA GPU is visible, builds with CUDA GPU support.
-# Otherwise, builds a CPU/OpenMP/thread-MPI version.
-# ============================================================
+---
 
-GROMACS_VERSION="2026.3"
-GROMACS_URL="https://ftp.gromacs.org/gromacs/gromacs-${GROMACS_VERSION}.tar.gz"
-GROMACS_MD5="7987af0c6ab939ab6e639f32d0dd260f"
-MIN_CUDA_VERSION="12.1"
-GCC_VERSION="14"
+## 📍 Where GROMACS is installed
 
-# Override if desired, e.g.:
-#   GMX_BUILD_JOBS=8 bash install_gromacs.sh
-BUILD_JOBS="${GMX_BUILD_JOBS:-$(nproc)}"
+The versioned installation is:
 
-banner() {
-    echo
-    echo "============================================================"
-    echo " $1"
-    echo "============================================================"
-}
-
-die() {
-    echo
-    echo "ERROR: $*" >&2
-    exit 1
-}
-
-version_ge() {
-    python - "$1" "$2" <<'PY'
-import sys
-def parts(v):
-    return tuple(int(x) for x in v.split(".") if x.isdigit())
-sys.exit(0 if parts(sys.argv[1]) >= parts(sys.argv[2]) else 1)
-PY
-}
-
-banner "GROMACS ${GROMACS_VERSION} Installer"
-
-# ------------------------------------------------------------
-# 1. Require an active, non-base Conda environment
-# ------------------------------------------------------------
-
-command -v conda >/dev/null 2>&1 || \
-    die "Conda is not available. Install Miniconda/Anaconda first."
-
-[[ -n "${CONDA_PREFIX:-}" ]] || \
-    die "No Conda environment is active. Run: conda activate <environment>"
-
-[[ "${CONDA_DEFAULT_ENV:-}" != "base" ]] || \
-    die "Refusing to install into Conda base. Activate a dedicated environment first."
-
-[[ "$(uname -s)" == "Linux" ]] || \
-    die "This installer is intended for Linux or WSL2."
-
-[[ "$(uname -m)" == "x86_64" ]] || \
-    die "This simple installer currently targets x86_64 Linux/WSL2."
-
-echo "Active Conda environment : ${CONDA_DEFAULT_ENV}"
-echo "Conda prefix             : ${CONDA_PREFIX}"
-echo "Build threads            : ${BUILD_JOBS}"
-
-# Prefer mamba if it is already installed.
-if command -v mamba >/dev/null 2>&1; then
-    PKG_MGR="mamba"
-else
-    PKG_MGR="conda"
-fi
-
-# ------------------------------------------------------------
-# 2. Install reproducible build tools inside this environment
-# ------------------------------------------------------------
-
-banner "Installing build dependencies"
-
-"${PKG_MGR}" install -y -c conda-forge \
-    "cmake>=3.28" \
-    make \
-    "gcc_linux-64=${GCC_VERSION}" \
-    "gxx_linux-64=${GCC_VERSION}" \
-    curl \
-    pkg-config
-
-CC_BIN="$(command -v x86_64-conda-linux-gnu-cc || true)"
-CXX_BIN="$(command -v x86_64-conda-linux-gnu-c++ || true)"
-
-[[ -n "${CC_BIN}" ]] || die "Conda C compiler was not found after installation."
-[[ -n "${CXX_BIN}" ]] || die "Conda C++ compiler was not found after installation."
-
-echo
-echo "C compiler   : ${CC_BIN}"
-echo "C++ compiler : ${CXX_BIN}"
-echo "CMake        : $(cmake --version | head -n 1)"
-
-# ------------------------------------------------------------
-# 3. Detect NVIDIA GPU and install CUDA Toolkit when needed
-# ------------------------------------------------------------
-
-GPU_BUILD=0
-CUDA_ROOT=""
-
-banner "Detecting GPU"
-
-if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
-    GPU_BUILD=1
-
-    echo "NVIDIA GPU detected:"
-    nvidia-smi -L
-    echo
-
-    CUDA_VERSION=""
-
-    if command -v nvcc >/dev/null 2>&1; then
-        CUDA_VERSION="$(
-            nvcc --version |
-            sed -n 's/.*release \([0-9][0-9.]*\).*/\1/p' |
-            head -n 1
-        )"
-    fi
-
-    if [[ -z "${CUDA_VERSION}" ]] || ! version_ge "${CUDA_VERSION}" "${MIN_CUDA_VERSION}"; then
-        echo "CUDA Toolkit ${MIN_CUDA_VERSION}+ was not found."
-        echo "Installing the current NVIDIA CUDA Toolkit into this Conda environment..."
-        echo
-
-        # NVIDIA documents this as the Conda installation method for CUDA Toolkit.
-        "${PKG_MGR}" install -y -c nvidia cuda
-
-        hash -r
-
-        command -v nvcc >/dev/null 2>&1 || \
-            die "CUDA Toolkit installation finished, but nvcc is not available."
-
-        CUDA_VERSION="$(
-            nvcc --version |
-            sed -n 's/.*release \([0-9][0-9.]*\).*/\1/p' |
-            head -n 1
-        )"
-    fi
-
-    version_ge "${CUDA_VERSION}" "${MIN_CUDA_VERSION}" || \
-        die "GROMACS ${GROMACS_VERSION} requires CUDA ${MIN_CUDA_VERSION}+; found ${CUDA_VERSION}."
-
-    CUDA_ROOT="$(dirname "$(dirname "$(readlink -f "$(command -v nvcc)")")")"
-
-    echo "CUDA compiler : $(command -v nvcc)"
-    echo "CUDA version  : ${CUDA_VERSION}"
-    echo "CUDA root     : ${CUDA_ROOT}"
-else
-    echo "No NVIDIA GPU is visible through nvidia-smi."
-    echo "GROMACS will be built with CPU + OpenMP + thread-MPI support."
-    echo
-    echo "If this machine has an NVIDIA GPU, fix NVIDIA/WSL GPU visibility"
-    echo "first and rerun this installer to obtain a CUDA-enabled build."
-fi
-
-# ------------------------------------------------------------
-# 4. Download and verify official GROMACS 2026.3 source
-# ------------------------------------------------------------
-
-banner "Downloading GROMACS ${GROMACS_VERSION}"
-
-WORK_ROOT="$(mktemp -d -t gromacs-${GROMACS_VERSION}-XXXXXX)"
-TARBALL="${WORK_ROOT}/gromacs-${GROMACS_VERSION}.tar.gz"
-SOURCE_DIR="${WORK_ROOT}/gromacs-${GROMACS_VERSION}"
-BUILD_DIR="${SOURCE_DIR}/build"
-
-cleanup() {
-    rm -rf "${WORK_ROOT}"
-}
-trap cleanup EXIT
-
-curl -fL \
-    --retry 3 \
-    --retry-delay 2 \
-    "${GROMACS_URL}" \
-    -o "${TARBALL}"
-
-python - "${TARBALL}" "${GROMACS_MD5}" <<'PY'
-import hashlib
-import pathlib
-import sys
-
-path = pathlib.Path(sys.argv[1])
-expected = sys.argv[2].lower()
-
-digest = hashlib.md5()
-with path.open("rb") as handle:
-    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-        digest.update(chunk)
-
-actual = digest.hexdigest().lower()
-
-print(f"Expected MD5 : {expected}")
-print(f"Actual MD5   : {actual}")
-
-if actual != expected:
-    raise SystemExit("ERROR: GROMACS source checksum does not match.")
-PY
-
-tar -xzf "${TARBALL}" -C "${WORK_ROOT}"
-
-[[ -d "${SOURCE_DIR}" ]] || \
-    die "Source directory was not created after extraction."
-
-# ------------------------------------------------------------
-# 5. Configure GROMACS
-# ------------------------------------------------------------
-
-banner "Configuring GROMACS"
-
-CMAKE_ARGS=(
-    -S "${SOURCE_DIR}"
-    -B "${BUILD_DIR}"
-    "-DCMAKE_INSTALL_PREFIX=${CONDA_PREFIX}"
-    "-DCMAKE_BUILD_TYPE=Release"
-    "-DCMAKE_C_COMPILER=${CC_BIN}"
-    "-DCMAKE_CXX_COMPILER=${CXX_BIN}"
-    "-DGMX_BUILD_OWN_FFTW=ON"
-    "-DGMX_MPI=OFF"
-    "-DGMX_THREAD_MPI=ON"
-    "-DGMX_OPENMP=ON"
-)
-
-if [[ "${GPU_BUILD}" -eq 1 ]]; then
-    CMAKE_ARGS+=(
-        "-DGMX_GPU=CUDA"
-        "-DCUDAToolkit_ROOT=${CUDA_ROOT}"
-        "-DCMAKE_CUDA_HOST_COMPILER=${CXX_BIN}"
-    )
-else
-    CMAKE_ARGS+=(
-        "-DGMX_GPU=OFF"
-    )
-fi
-
-cmake "${CMAKE_ARGS[@]}"
-
-# ------------------------------------------------------------
-# 6. Compile and install directly into the active Conda env
-# ------------------------------------------------------------
-
-banner "Building GROMACS"
-
-cmake --build "${BUILD_DIR}" --parallel "${BUILD_JOBS}"
-
-banner "Installing into ${CONDA_DEFAULT_ENV}"
-
-cmake --install "${BUILD_DIR}"
-
-# Clear any shell executable lookup cache in this installer shell.
-hash -r
-
-[[ -x "${CONDA_PREFIX}/bin/gmx" ]] || \
-    die "Installation completed but ${CONDA_PREFIX}/bin/gmx does not exist."
-
-# Source GMXRC for this installer process so verification uses the
-# complete GROMACS runtime environment.
-if [[ -f "${CONDA_PREFIX}/bin/GMXRC" ]]; then
-    # shellcheck disable=SC1090
-    source "${CONDA_PREFIX}/bin/GMXRC"
-fi
-
-# ------------------------------------------------------------
-# 7. Verify installation
-# ------------------------------------------------------------
-
-banner "Verifying GROMACS"
-
-GMX_VERSION_OUTPUT="$("${CONDA_PREFIX}/bin/gmx" --version)"
-printf '%s\n' "${GMX_VERSION_OUTPUT}"
-
-echo
-if ! grep -q "GROMACS version:.*${GROMACS_VERSION}" <<< "${GMX_VERSION_OUTPUT}"; then
-    die "gmx is installed, but the reported version is not ${GROMACS_VERSION}."
-fi
-
-if [[ "${GPU_BUILD}" -eq 1 ]]; then
-    if grep -qi "GPU support:.*CUDA" <<< "${GMX_VERSION_OUTPUT}"; then
-        echo "SUCCESS: GROMACS ${GROMACS_VERSION} was built with CUDA GPU support."
-    else
-        die "An NVIDIA GPU was detected, but gmx --version does not report CUDA GPU support."
-    fi
-else
-    echo "SUCCESS: GROMACS ${GROMACS_VERSION} was installed as a CPU build."
-fi
-
-# Save reproducibility information inside the Conda environment.
-{
-    echo "GROMACS source: ${GROMACS_URL}"
-    echo "GROMACS MD5: ${GROMACS_MD5}"
-    echo "Installed: $(date -Is)"
-    echo "Conda environment: ${CONDA_DEFAULT_ENV}"
-    echo "Conda prefix: ${CONDA_PREFIX}"
-    echo "GPU build requested: ${GPU_BUILD}"
-    if [[ "${GPU_BUILD}" -eq 1 ]]; then
-        echo "CUDA version: ${CUDA_VERSION}"
-        echo "CUDA root: ${CUDA_ROOT}"
-    fi
-    echo
-    printf '%s\n' "${GMX_VERSION_OUTPUT}"
-} > "${CONDA_PREFIX}/GROMACS_${GROMACS_VERSION}_BUILD_INFO.txt"
-
-echo
-echo "Build record:"
-echo "  ${CONDA_PREFIX}/GROMACS_${GROMACS_VERSION}_BUILD_INFO.txt"
-echo
-echo "GROMACS executable:"
-echo "  ${CONDA_PREFIX}/bin/gmx"
-echo
-echo "Because GROMACS was installed directly into the active Conda"
-echo "environment, no system-wide installation and no sudo are required."
-echo
-echo "After this installer returns, verify from your current shell with:"
-echo
-echo "  gmx --version"
-echo
-echo "If your shell has stale state, simply reactivate the environment:"
-echo
-echo "  conda deactivate"
-echo "  conda activate ${CONDA_DEFAULT_ENV}"
-echo
-echo "Then:"
-echo
-echo "  gmx --version"
-echo
-echo "Installation complete."
-
+```text
+/usr/local/gromacs-2026.3
 ```
+
+A stable symlink points to the current version:
+
+```text
+/usr/local/gromacs
+    -> /usr/local/gromacs-2026.3
+```
+
+The global command is exposed as:
+
+```text
+/usr/local/bin/gmx
+```
+
+The complete layout is therefore:
+
+```text
+/usr/local/
+├── gromacs-2026.3/
+│   ├── bin/
+│   │   ├── gmx
+│   │   └── GMXRC
+│   ├── lib/
+│   ├── share/
+│   └── ...
+├── gromacs -> gromacs-2026.3
+└── bin/
+    └── gmx -> /usr/local/gromacs/bin/gmx
+```
+
+This follows the standard GROMACS source-install model while retaining a versioned installation for reproducibility.
 
 ---
 
 ## ✅ Verify the installation
 
-After the installer completes:
+Refresh Bash command lookup:
+
+```bash
+hash -r
+```
+
+Then:
 
 ```bash
 gmx --version
 ```
 
-For an NVIDIA/CUDA build, the output should include information similar to:
+Check where it comes from:
+
+```bash
+which gmx
+```
+
+Expected:
+
+```text
+/usr/local/bin/gmx
+```
+
+For an NVIDIA CUDA build, `gmx --version` should report:
 
 ```text
 GROMACS version:    2026.3
 GPU support:        CUDA
 ```
 
-You can also check that the executable comes from the active environment:
+---
+
+## 🧪 Test across Conda environments
+
+The entire point of this repository is that GROMACS is **not** tied to a Python environment.
+
+Test it:
 
 ```bash
+conda activate base
 which gmx
+gmx --version
 ```
 
-Expected pattern:
+Then:
+
+```bash
+conda activate mdanalysis
+which gmx
+gmx --version
+```
+
+Then:
+
+```bash
+conda activate cgenff
+which gmx
+gmx --version
+```
+
+All three should resolve to:
 
 ```text
-.../anaconda3/envs/mdanalysis/bin/gmx
+/usr/local/bin/gmx
+```
+
+You can also test without Conda:
+
+```bash
+conda deactivate
+which gmx
+gmx --version
 ```
 
 ---
 
-## 🎮 GPU behavior
+## 🎮 NVIDIA GPU support
 
-The installer uses the following logic:
-
-| Hardware state | Result |
-|---|---|
-| NVIDIA GPU visible through `nvidia-smi` | Build GROMACS with `GMX_GPU=CUDA` |
-| NVIDIA GPU visible but CUDA Toolkit is missing | Install CUDA Toolkit in the active Conda environment, then build with CUDA |
-| CUDA Toolkit older than the GROMACS 2026 requirement | Install a current CUDA Toolkit in the environment |
-| No NVIDIA GPU visible | Build CPU + OpenMP + thread-MPI GROMACS |
-| NVIDIA GPU expected but `nvidia-smi` fails | Fix GPU/driver visibility, then rerun this installer |
-
-GROMACS 2026 requires **CUDA 12.1 or newer** for the CUDA backend.
-
-The installer uses:
+For NVIDIA systems, GROMACS is compiled with:
 
 ```text
 GMX_GPU=CUDA
 GMX_OPENMP=ON
 GMX_THREAD_MPI=ON
 GMX_MPI=OFF
+GMX_DOUBLE=OFF
 GMX_BUILD_OWN_FFTW=ON
 CMAKE_BUILD_TYPE=Release
 ```
 
-This configuration is intended for a **single Linux/WSL workstation**, including GPU workstations used for local PyMACS simulations.
+This is intended for a normal single-node Linux/WSL workstation.
 
-External MPI/HPC installations are intentionally outside the scope of this simple installer.
-
----
-
-## 🪟 WSL2 + NVIDIA note
-
-When using WSL2, NVIDIA GPU support comes from the **Windows NVIDIA driver**.
-
-Do **not** install a Linux NVIDIA display driver inside WSL.
-
-The expected workflow is:
-
-```text
-Windows NVIDIA Driver
-        ↓
-WSL2 sees GPU through nvidia-smi
-        ↓
-CUDA Toolkit inside Linux/Conda
-        ↓
-CUDA-enabled GROMACS build
-```
-
-Before installing GROMACS, check:
+The installer checks:
 
 ```bash
 nvidia-smi
 ```
 
-If the GPU appears there, the installer can build the CUDA version.
+If an NVIDIA GPU is visible, it looks for a system CUDA Toolkit.
 
-If `nvidia-smi` does not work in WSL, fix the Windows/WSL NVIDIA setup before expecting GROMACS GPU acceleration.
+GROMACS 2026.3 requires:
+
+```text
+CUDA >= 12.1
+```
+
+If a suitable CUDA Toolkit is already available, it is reused.
+
+If the GPU is visible but CUDA development tools are missing, the installer can install the **system CUDA Toolkit** on supported Ubuntu/WSL2 systems.
+
+The default preferred package is:
+
+```text
+cuda-toolkit-12-6
+```
+
+because CUDA 12.6 is among the CUDA versions reported in the GROMACS 2026 tested-platform configuration.
+
+You can request NVIDIA's current toolkit package instead:
+
+```bash
+GMX_CUDA_PACKAGE=cuda-toolkit ./install_gromacs.sh
+```
 
 ---
 
-## 🧠 Why install into the Conda environment?
+## 🪟 WSL2 + NVIDIA
 
-A normal source installation often uses a prefix such as:
+For WSL2, the NVIDIA architecture is:
 
 ```text
-/usr/local/gromacs
+Windows NVIDIA Driver
+        ↓
+WSL2 GPU interface
+        ↓
+Linux CUDA Toolkit
+        ↓
+GROMACS CUDA build
 ```
 
-That works, but it creates a separate system dependency that users must remember to load.
+The Windows NVIDIA driver is the GPU driver.
 
-This installer instead uses:
+**Do not install a Linux NVIDIA display driver inside WSL2.**
+
+The installer uses the NVIDIA CUDA Toolkit repository appropriate for WSL and installs toolkit components rather than a Linux display driver.
+
+Before installation:
 
 ```bash
--DCMAKE_INSTALL_PREFIX="$CONDA_PREFIX"
+nvidia-smi
 ```
 
-So when the `mdanalysis` environment is active, GROMACS is installed under that same environment:
+If the GPU is visible there, the installer can build CUDA-enabled GROMACS.
+
+---
+
+## 🧠 Why system-wide instead of Conda?
+
+Python dependencies and GROMACS solve different problems.
+
+A PyMACS workstation may use:
+
+```text
+cgenff
+```
+
+for preparation and parameterization, then:
+
+```text
+mdanalysis
+```
+
+for trajectory analysis.
+
+GROMACS itself should not need to be duplicated into every environment.
+
+Instead:
+
+```text
+                       ┌── base
+                       ├── cgenff
+/usr/local/bin/gmx <───┼── mdanalysis
+                       ├── future-env
+                       └── ordinary Linux shell
+```
+
+This keeps GROMACS independent from Python package management.
+
+---
+
+## ⚠️ Conda shadowing
+
+Conda normally leaves `/usr/local/bin` on `PATH`, so the system GROMACS remains available.
+
+However, if someone later installs another package named `gromacs` **inside a specific Conda environment**, that environment may contain its own:
 
 ```text
 $CONDA_PREFIX/bin/gmx
-$CONDA_PREFIX/bin/GMXRC
-$CONDA_PREFIX/share/gromacs/
 ```
 
-The active Conda environment already places:
+and that executable can take precedence over `/usr/local/bin/gmx`.
+
+Check all visible copies with:
+
+```bash
+type -a gmx
+```
+
+For the workflow documented here, do **not** install a separate Conda GROMACS package.
+
+The desired executable is:
 
 ```text
-$CONDA_PREFIX/bin
+/usr/local/bin/gmx
 ```
-
-on `PATH`, so `gmx` becomes available as part of that environment.
-
-No system-wide shell configuration is required.
-
----
-
-## 🔄 Do I need to restart the shell?
-
-Normally, **no**.
-
-Because `gmx` is installed directly into:
-
-```text
-$CONDA_PREFIX/bin
-```
-
-and that directory is already on `PATH`, the current activated environment can normally find `gmx` immediately.
-
-Check:
-
-```bash
-gmx --version
-```
-
-If the shell still has stale state, reactivate the environment:
-
-```bash
-conda deactivate
-conda activate mdanalysis
-gmx --version
-```
-
----
-
-## 🧪 PyMACS usage
-
-Once the installation succeeds:
-
-```bash
-conda activate mdanalysis
-gmx --version
-```
-
-PyMACS standard scripts can then use:
-
-```text
-gmx
-```
-
-directly.
-
-Example:
-
-```bash
-python 2_AutomateGromacs.py
-```
-
-or:
-
-```bash
-python 3A_AutomateGromacs.py
-```
-
-For a batch analysis wrapper:
-
-```bash
-./run_maddison_3A_batch.sh
-```
-
-The key requirement is simply:
-
-```bash
-command -v gmx
-```
-
-returning a valid executable while the environment is active.
 
 ---
 
 ## 🛠️ What the installer does
 
-The script performs these steps automatically:
+The installer:
 
-1. Confirms that Conda is available.
-2. Requires a dedicated active Conda environment.
-3. Refuses to modify Conda `base`.
-4. Installs CMake, Make, GCC/G++, `curl`, and `pkg-config` into the active environment.
-5. Checks whether an NVIDIA GPU is visible.
-6. Installs the NVIDIA CUDA Toolkit into the environment when CUDA compilation is required.
-7. Downloads the official GROMACS 2026.3 source archive.
-8. Verifies the official MD5 checksum.
-9. Configures a Release build.
-10. Enables CUDA automatically for NVIDIA systems.
-11. Enables OpenMP and thread-MPI.
-12. Builds GROMACS' recommended single-precision FFTW dependency.
-13. Compiles GROMACS.
-14. Installs GROMACS into the active Conda environment.
-15. Runs `gmx --version`.
-16. Verifies that a GPU build actually reports CUDA support.
-17. Writes a reproducibility record into the Conda environment.
+1. Verifies Linux / WSL2 and x86_64.
+2. Requests `sudo` only because `/usr/local` is a system location.
+3. Installs build dependencies using APT.
+4. Ensures GROMACS' required CMake version is available.
+5. Uses the **system GCC/G++**, not Conda compilers.
+6. Removes common Conda CMake/library hints during configuration.
+7. Detects NVIDIA GPU availability.
+8. Detects or installs a system CUDA Toolkit when required.
+9. Downloads the official GROMACS 2026.3 source archive.
+10. Verifies the official source MD5 checksum.
+11. Builds FFTW automatically.
+12. Compiles GROMACS with CUDA on NVIDIA systems.
+13. Installs to `/usr/local/gromacs-2026.3`.
+14. Creates `/usr/local/gromacs`.
+15. Creates `/usr/local/bin/gmx`.
+16. Creates `/etc/profile.d/gromacs.sh`.
+17. Verifies the final system binary.
+18. Writes a reproducibility record.
 
 ---
 
-## 📄 Build record
+## 🧼 Conda isolation during the build
+
+The installer may be launched from a terminal where Conda is active.
+
+That is okay.
+
+The build explicitly uses:
+
+```text
+/usr/bin/gcc
+/usr/bin/g++
+/usr/bin/cmake
+```
+
+and removes common CMake path hints that could point into `$CONDA_PREFIX`.
+
+This prevents an active Python environment from becoming an accidental runtime dependency of the system GROMACS build.
+
+---
+
+## 🔄 Shell setup
+
+A stable executable is created at:
+
+```text
+/usr/local/bin/gmx
+```
+
+so `gmx` should be callable immediately from normal Linux PATH configurations.
+
+The installer also creates:
+
+```text
+/etc/profile.d/gromacs.sh
+```
+
+which loads:
+
+```text
+/usr/local/gromacs/bin/GMXRC
+```
+
+for new login shells.
+
+For the current shell:
+
+```bash
+hash -r
+source /etc/profile.d/gromacs.sh
+gmx --version
+```
+
+Opening a new terminal also loads the system setup.
+
+---
+
+## 📄 Reproducibility record
 
 Every successful installation writes:
 
 ```text
-$CONDA_PREFIX/GROMACS_2026.3_BUILD_INFO.txt
+/usr/local/share/GROMACS_2026.3_BUILD_INFO.txt
 ```
 
-This records information including:
+It records:
 
 - GROMACS source URL
-- source checksum
-- installation date
-- Conda environment
-- installation prefix
-- whether CUDA was enabled
-- CUDA version, when applicable
-- full `gmx --version` output
+- official source MD5
+- installation timestamp
+- versioned prefix
+- stable prefix
+- system GCC version
+- system CMake version
+- CUDA status
+- CUDA version and location when applicable
+- complete `gmx --version` output
 
-Example:
+View it with:
 
 ```bash
-cat "$CONDA_PREFIX/GROMACS_2026.3_BUILD_INFO.txt"
+cat /usr/local/share/GROMACS_2026.3_BUILD_INFO.txt
 ```
+
+---
+
+## 🧪 PyMACS
+
+After installing:
+
+```bash
+which gmx
+gmx --version
+```
+
+should work before or after:
+
+```bash
+conda activate mdanalysis
+```
+
+PyMACS can therefore call standard GROMACS commands directly:
+
+```bash
+python 1_AutomateGromacs.py
+python 2_AutomateGromacs.py
+python 3A_AutomateGromacs.py
+```
+
+For example:
+
+```bash
+conda activate mdanalysis
+python 3A_AutomateGromacs.py
+```
+
+uses the same system:
+
+```text
+/usr/local/bin/gmx
+```
+
+as every other environment.
 
 ---
 
 ## 🧯 Troubleshooting
 
-### `nvidia-smi: command not found`
+### `gmx: command not found`
 
-If this is WSL2 and the machine has an NVIDIA GPU, verify that the Windows NVIDIA driver supports WSL GPU computing.
+Run:
 
-Do not solve this by installing a Linux display driver inside WSL.
+```bash
+hash -r
+source /etc/profile.d/gromacs.sh
+which gmx
+```
+
+Expected:
+
+```text
+/usr/local/bin/gmx
+```
 
 ---
 
-### GROMACS installs but reports no CUDA support
+### Check all GROMACS executables
 
-Run:
+```bash
+type -a gmx
+```
+
+The preferred one is:
+
+```text
+/usr/local/bin/gmx
+```
+
+If a Conda environment contains another `gmx`, remove the Conda GROMACS package or call the system executable explicitly:
+
+```bash
+/usr/local/bin/gmx --version
+```
+
+---
+
+### NVIDIA GPU expected but no CUDA build
+
+Check:
+
+```bash
+nvidia-smi
+```
+
+and:
 
 ```bash
 gmx --version
 ```
 
-If you expected GPU support, look for:
+For the GPU build, GROMACS should report:
 
 ```text
 GPU support: CUDA
 ```
 
-Also check:
+---
+
+### CUDA compiler
+
+Check:
 
 ```bash
-nvidia-smi
 nvcc --version
 ```
 
-If the GPU was not visible when the installer started, the installer intentionally generated a CPU build.
-
-Fix GPU visibility and rerun the installer.
-
----
-
-### Check the active Conda environment
+If `nvcc` is not visible in an existing shell after installation:
 
 ```bash
-echo "$CONDA_DEFAULT_ENV"
-echo "$CONDA_PREFIX"
-which python
-which gmx
-```
-
-For PyMACS, a typical result is:
-
-```text
-mdanalysis
-/home/USER/anaconda3/envs/mdanalysis
-/home/USER/anaconda3/envs/mdanalysis/bin/python
-/home/USER/anaconda3/envs/mdanalysis/bin/gmx
+source /etc/profile.d/cuda-toolkit.sh
+nvcc --version
 ```
 
 ---
 
 ### Limit compilation threads
 
-By default, the installer uses:
+The default is:
 
-```bash
+```text
 nproc
 ```
 
-build threads.
-
-To reduce build load:
+To limit compilation load:
 
 ```bash
-GMX_BUILD_JOBS=8 bash install_gromacs.sh
+GMX_BUILD_JOBS=8 ./install_gromacs.sh
 ```
-
-or edit:
-
-```bash
-BUILD_JOBS=8
-```
-
-inside the installer.
-
----
-
-## 🧹 Reinstalling
-
-The installer can be rerun in the same environment.
-
-It rebuilds GROMACS from verified source and installs the requested version back into the active Conda prefix.
-
-For a completely clean environment-level reinstall, the most reproducible approach is often to recreate the Conda environment and run this installer again.
 
 ---
 
 ## 📚 Official sources
 
-GROMACS 2026.3 documentation:
+GROMACS documentation:
 
 https://manual.gromacs.org/current/
 
@@ -762,31 +586,35 @@ GROMACS installation guide:
 
 https://manual.gromacs.org/documentation/current/install-guide/index.html
 
-NVIDIA CUDA Linux installation guide:
+NVIDIA CUDA installation guide:
 
 https://docs.nvidia.com/cuda/cuda-installation-guide-linux/
 
-NVIDIA CUDA on WSL guide:
+Kitware CMake APT repository:
 
-https://docs.nvidia.com/cuda/wsl-user-guide/
-
----
-
-## 🔗 PyMACS
-
-This installer is designed to provide the GROMACS dependency expected by:
-
-**PyMACS — A Python-Based Automation Suite for GROMACS Molecular Dynamics Setup, Simulation, Analysis, and Figurebook Generation**
-
-https://github.com/schurerlab/Pymacs
-
-Once the Conda environment contains a working `gmx` executable, standard PyMACS scripts can call GROMACS directly.
+https://apt.kitware.com/
 
 ---
 
-## 🧬 GROMACS citation and release provenance
+## 🧬 Release provenance
 
-This repository installs **GROMACS 2026.3** from the official GROMACS source archive.
+This installer targets:
+
+```text
+GROMACS 2026.3
+```
+
+Official source:
+
+```text
+https://ftp.gromacs.org/gromacs/gromacs-2026.3.tar.gz
+```
+
+Official MD5:
+
+```text
+7987af0c6ab939ab6e639f32d0dd260f
+```
 
 Official documentation DOI:
 
@@ -794,33 +622,45 @@ Official documentation DOI:
 10.5281/zenodo.20845233
 ```
 
-Official source-code DOI for GROMACS 2026.3:
+Official source-code DOI:
 
 ```text
 10.5281/zenodo.20845217
 ```
 
-Official source MD5:
+---
 
-```text
-7987af0c6ab939ab6e639f32d0dd260f
-```
+## 🔗 PyMACS
+
+**PyMACS: A Python-Based Automation Suite for GROMACS Molecular Dynamics Setup, Simulation, Analysis, and Figurebook Generation**
+
+https://github.com/schurerlab/Pymacs
 
 ---
 
 ## 🙌 Practical takeaway
 
-For a new PyMACS workstation:
+Install GROMACS once:
 
 ```bash
-conda activate mdanalysis
+./install_gromacs.sh
 ```
 
-run the installer once, then verify:
+Then use the same `gmx` everywhere:
 
 ```bash
+conda activate base
+gmx --version
+
+conda activate mdanalysis
+gmx --version
+
+conda activate cgenff
 gmx --version
 ```
 
-After that, GROMACS is available whenever that environment is used.
-# gromacs-installation
+The intended result is always:
+
+```text
+/usr/local/bin/gmx
+```
