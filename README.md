@@ -55,11 +55,26 @@ Run:
 ```bash
 chmod +x install_gromacs.sh
 ./install_gromacs.sh
+hash -r
+source /etc/profile.d/gromacs.sh
+gmx --version
 ```
 
 You may run the installer while `base`, `mdanalysis`, `cgenff`, another Conda environment, or no Conda environment is active.
 
 **The active Conda environment does not own the installation.**
+
+That means `gmx` is not copied into:
+
+```text
+$CONDA_PREFIX/bin/gmx
+```
+
+Instead, every environment uses the same system executable:
+
+```text
+/usr/local/bin/gmx
+```
 
 The installer requires `sudo` because GROMACS is installed under `/usr/local`.
 
@@ -160,6 +175,8 @@ conda activate mdanalysis
 which gmx
 gmx --version
 ```
+
+This is the important test for Maddison's analysis workflow: `mdanalysis` should still see `gmx`, but it should see the system copy.
 
 Then:
 
@@ -336,7 +353,7 @@ The installer:
 3. Installs build dependencies using APT.
 4. Ensures GROMACS' required CMake version is available.
 5. Uses the **system GCC/G++**, not Conda compilers.
-6. Removes common Conda CMake/library hints during configuration.
+6. Runs CMake in a clean system-oriented build environment.
 7. Detects NVIDIA GPU availability.
 8. Detects or installs a system CUDA Toolkit when required.
 9. Downloads the official GROMACS 2026.3 source archive.
@@ -366,7 +383,7 @@ The build explicitly uses:
 /usr/bin/cmake
 ```
 
-and removes common CMake path hints that could point into `$CONDA_PREFIX`.
+and runs configuration without Conda's compiler, CMake, or library paths.
 
 This prevents an active Python environment from becoming an accidental runtime dependency of the system GROMACS build.
 
@@ -405,6 +422,8 @@ gmx --version
 ```
 
 Opening a new terminal also loads the system setup.
+
+The installer cannot literally restart your terminal for you, but `source /etc/profile.d/gromacs.sh` gives the current shell the same GROMACS setup immediately.
 
 ---
 
@@ -547,10 +566,10 @@ Check:
 nvcc --version
 ```
 
-If `nvcc` is not visible in an existing shell after installation:
+If CUDA was just installed and `nvcc` is not visible in the current shell yet, open a new terminal or try:
 
 ```bash
-source /etc/profile.d/cuda-toolkit.sh
+export PATH=/usr/local/cuda/bin:$PATH
 nvcc --version
 ```
 
