@@ -119,6 +119,14 @@ The complete layout is therefore:
 
 This follows the standard GROMACS source-install model while retaining a versioned installation for reproducibility.
 
+If `/usr/local/gromacs` already exists from an older manual install, the installer moves it aside with a timestamped backup name before creating the stable symlink. This prevents broken links such as:
+
+```text
+/usr/local/bin/gmx -> /usr/local/gromacs/bin/gmx
+```
+
+when `/usr/local/gromacs/bin/gmx` does not actually exist.
+
 ---
 
 ## ✅ Verify the installation
@@ -513,6 +521,8 @@ Expected:
 ```text
 /usr/local/bin/gmx
 ```
+
+If `/usr/local/bin/gmx` exists but points to a missing file, rerun the latest installer. It repairs stale system links automatically after the build.
 
 ---
 

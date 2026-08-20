@@ -330,6 +330,40 @@ configure_build() {
         /usr/bin/cmake "${CMAKE_ARGS[@]}"
 }
 
+repair_system_links() {
+    [[ -x "${VERSIONED_PREFIX}/bin/gmx" ]] || \
+        die "GROMACS installed, but ${VERSIONED_PREFIX}/bin/gmx was not created."
+
+    if [[ -e "${STABLE_PREFIX}" && ! -L "${STABLE_PREFIX}" ]]; then
+        local backup_prefix="${STABLE_PREFIX}.backup-$(date +%Y%m%d-%H%M%S)"
+        echo "Existing ${STABLE_PREFIX} directory found."
+        echo "Moving it aside to ${backup_prefix}"
+        sudo_cmd mv "${STABLE_PREFIX}" "${backup_prefix}"
+    fi
+
+    if [[ -L "${STABLE_PREFIX}" && ! -e "${STABLE_PREFIX}" ]]; then
+        echo "Removing broken ${STABLE_PREFIX} symlink."
+        sudo_cmd rm -f "${STABLE_PREFIX}"
+    fi
+
+    if [[ -L "${GMX_LINK}" && ! -e "${GMX_LINK}" ]]; then
+        echo "Removing broken ${GMX_LINK} symlink."
+        sudo_cmd rm -f "${GMX_LINK}"
+    fi
+
+    sudo_cmd ln -sfnT "${VERSIONED_PREFIX}" "${STABLE_PREFIX}"
+    sudo_cmd ln -sfnT "${STABLE_PREFIX}/bin/gmx" "${GMX_LINK}"
+
+    [[ "$(readlink "${STABLE_PREFIX}")" == "${VERSIONED_PREFIX}" ]] || \
+        die "${STABLE_PREFIX} does not point to ${VERSIONED_PREFIX}."
+
+    [[ "$(readlink "${GMX_LINK}")" == "${STABLE_PREFIX}/bin/gmx" ]] || \
+        die "${GMX_LINK} does not point to ${STABLE_PREFIX}/bin/gmx."
+
+    [[ -x "${STABLE_PREFIX}/bin/gmx" && -x "${GMX_LINK}" ]] || \
+        die "System GROMACS links were created, but gmx is still not executable."
+}
+
 build_and_install() {
     banner "Building GROMACS"
     /usr/bin/cmake --build "${BUILD_DIR}" --parallel "${BUILD_JOBS}"
@@ -337,8 +371,7 @@ build_and_install() {
     banner "Installing system-wide"
     sudo_cmd /usr/bin/cmake --install "${BUILD_DIR}"
 
-    sudo_cmd ln -sfn "${VERSIONED_PREFIX}" "${STABLE_PREFIX}"
-    sudo_cmd ln -sfn "${STABLE_PREFIX}/bin/gmx" "${GMX_LINK}"
+    repair_system_links
 
     sudo_cmd tee /etc/profile.d/gromacs.sh >/dev/null <<EOF
 # GROMACS ${GROMACS_VERSION}
